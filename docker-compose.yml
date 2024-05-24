@@ -1,0 +1,101 @@
+version: '3'
+
+services:
+  oltp-db:
+    image: postgres
+    environment:
+      POSTGRES_DB: oltp_db  
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 'Root#123'
+    volumes:
+     # - ./postgres/oltp-data:/var/lib/postgresql/data
+      - ./postgres/oltp-schema.sql:/docker-entrypoint-initdb.d/oltp-schema.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - default
+
+  data-filler:
+    build:
+      context: ./filler
+      dockerfile: Dockerfile
+    depends_on:
+      - oltp-db
+    environment:
+      DATABASE_URL: postgres://postgres:Root#123@oltp-db:5432/oltp_db
+    volumes:
+      - ./filler:/usr/src/filler
+      - ./postgres/start-oltp.sh:/docker-entrypoint-initdb.d/start-oltp.sh
+    networks:
+      - default
+
+  nifi:
+    container_name: nifi
+    image: apache/nifi:latest
+    ports:
+      - 9443:9443
+    environment:
+      - SINGLE_USER_CREDENTIALS_USERNAME=admin
+      - SINGLE_USER_CREDENTIALS_PASSWORD=ctsBtRBKHRAx69EqUghvvgEvjnaLjFEB
+      - NIFI_WEB_HTTPS_PORT=9443
+    volumes:
+      - nifi_content_repository:/opt/nifi/nifi-current/content_repository
+      - nifi_database_repository:/opt/nifi/nifi-current/database_repository
+      - nifi_flowfile_repository:/opt/nifi/nifi-current/flowfile_repository
+      - nifi_provenance_repository:/opt/nifi/nifi-current/provenance_repository
+      - nifi_logs:/opt/nifi/nifi-current/logs
+      - nifi_state:/opt/nifi/nifi-current/state
+      - nifi_conf:/opt/nifi/nifi-current/conf
+
+
+  olap-db:
+    image: postgres
+    environment:
+      POSTGRES_DB: olap_db  
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 'Root#123'
+    volumes:
+     # - ./postgres/olap-data:/var/lib/postgresql/data
+      - ./postgres/olap-star-schema.sql:/docker-entrypoint-initdb.d/olap-star-schema.sql
+      - ./postgres/olap_fill.sh:/usr/local/bin/olap_fill.sh
+    #entrypoint: ["olap_fill.sh"]
+    depends_on:
+      - oltp-db
+      - nifi
+    ports:
+      - "5433:5432"  
+    networks:
+      - default
+
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - default
+
+  grafana:
+    image: grafana/grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: 'admin-password'
+    ports:
+      - "3000:3000"
+    networks:
+      - default
+    depends_on:
+      - prometheus
+
+
+volumes:
+  nifi_content_repository:
+  nifi_database_repository:
+  nifi_flowfile_repository:
+  nifi_provenance_repository:
+  nifi_logs:
+  nifi_state:
+  nifi_conf:
+
+networks:
+  default:
